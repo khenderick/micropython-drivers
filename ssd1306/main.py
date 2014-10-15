@@ -1,10 +1,17 @@
 import pyb
 from ssd1306 import SSD1306
 
+# SPI
 display = SSD1306(pinout={'dc': 'Y3',
                           'res': 'Y4'},
                   height=64,
                   external_vcc=False)
+
+# I2C connected to Y9, Y10 (I2C bus 2)
+##display = SSD1306(pinout={'sda': 'Y10',
+##                          'scl': 'Y9'},
+##                  height=64,
+##                  external_vcc=False)
 
 led_red = pyb.LED(1)
 led_red.off()

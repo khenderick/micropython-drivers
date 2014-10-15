@@ -37,30 +37,63 @@ LEFT_HORIZONTAL_SCROLL               = 0x27
 VERTICAL_AND_RIGHT_HORIZONTAL_SCROLL = 0x29
 VERTICAL_AND_LEFT_HORIZONTAL_SCROLL  = 0x2A
 
+# I2C devices are accessed through a Device ID. This is a 7-bit
+# value but is sometimes expressed left-shifted by 1 as an 8-bit value.
+# A pin on SSD1306 allows it to respond to ID 0x3C or 0x3D. The board
+# I bought from ebay used a 0-ohm resistor to select between "0x78"
+# (0x3c << 1) or "0x7a" (0x3d << 1). The default was set to "0x78"
+DEVID = 0x3c
+
+# I2C communication here is either <DEVID> <CTL_CMD> <command byte>
+# or <DEVID> <CTL_DAT> <display buffer bytes> <> <> <> <>...
+# These two values encode the Co (Continuation) bit as b7 and the
+# D/C# (Data/Command Selection) bit as b6.
+CTL_CMD = 0x80
+CTL_DAT = 0x40
+
 class SSD1306(object):
 
-  def __init__(self, pinout, height=32, external_vcc=True):
+  def __init__(self, pinout, height=32, external_vcc=True, i2c_devid=DEVID):
     self.external_vcc = external_vcc
     self.height       = 32 if height == 32 else 64
     self.pages        = int(self.height / 8)
     self.columns      = 128
 
-    rate = 16 * 1024 * 1024
-
-    self.spi = pyb.SPI(2, pyb.SPI.MASTER, baudrate=rate, polarity=1, phase=0)  # SCK: Y6: MOSI: Y8
-    self.dc  = pyb.Pin(pinout['dc'],  pyb.Pin.OUT_PP, pyb.Pin.PULL_DOWN)
-    self.res = pyb.Pin(pinout['res'], pyb.Pin.OUT_PP, pyb.Pin.PULL_DOWN)
+    # Infer interface type from entries in pinout{}
+    if 'dc' in pinout:
+      # SPI
+      rate = 16 * 1024 * 1024
+      self.spi = pyb.SPI(2, pyb.SPI.MASTER, baudrate=rate, polarity=1, phase=0)  # SCK: Y6: MOSI: Y8
+      self.dc  = pyb.Pin(pinout['dc'],  pyb.Pin.OUT_PP, pyb.Pin.PULL_DOWN)
+      self.res = pyb.Pin(pinout['res'], pyb.Pin.OUT_PP, pyb.Pin.PULL_DOWN)
+      self.offset = 0
+    else:
+      # Infer bus number from pin
+      if pinout['sda'] == 'X9':
+        self.i2c = pyb.I2C(1)
+      else:
+        self.i2c = pyb.I2C(2)
+      self.i2c.init(pyb.I2C.MASTER, baudrate=400000) # 400kHz
+      self.devid = i2c_devid
+      # used to reserve an extra byte in the image buffer AND as a way to
+      # infer the interface type
+      self.offset = 1
+      # I2C command buffer
+      self.cbuffer = bytearray(2)
+      self.cbuffer[0] = CTL_CMD
 
   def clear(self):
-    self.buffer = bytearray(self.pages * self.columns)  
+    self.buffer = bytearray(self.offset + self.pages * self.columns)
+    if self.offset == 1:
+      self.buffer[0] = CTL_DAT
 
   def write_command(self, command_byte):
-    self.dc.low()
-    self.spi.send(command_byte)
-
-  def write_data(self, data_byte):
-    self.dc.high()
-    self.spi.send(data_byte)
+    if self.offset == 1:
+      self.cbuffer[1] = command_byte
+      self.i2c.send(self.cbuffer, addr=self.devid, timeout=5000)
+    else:
+      self.dc.low()
+      self.spi.send(command_byte)
 
   def invert_display(self, invert):
     self.write_command(INVERTDISPLAY if invert else NORMALDISPLAY)
@@ -72,16 +105,18 @@ class SSD1306(object):
     self.write_command(PAGEADDR)
     self.write_command(0)
     self.write_command(self.pages - 1)
-
-    self.dc.high()
-    self.spi.send(self.buffer)
+    if self.offset == 1:
+      self.i2c.send(self.buffer, addr=self.devid, timeout=5000)
+    else:
+      self.dc.high()
+      self.spi.send(self.buffer)
 
   def set_pixel(self, x, y, state):
     index = x + (int(y / 8) * self.columns)
     if state:
-      self.buffer[index] |= (1 << (y & 7))
+      self.buffer[self.offset + index] |= (1 << (y & 7))
     else:
-      self.buffer[index] &= ~(1 << (y & 7))
+      self.buffer[self.offset + index] &= ~(1 << (y & 7))
 
   def init_display(self):
     chargepump = 0x10 if self.external_vcc else 0x14
@@ -93,7 +128,7 @@ class SSD1306(object):
             SETDISPLAYCLOCKDIV, 0x80,
             SETMULTIPLEX, multiplex,
             SETDISPLAYOFFSET, 0x00,
-            SETSTARTLINE | 0x00,            
+            SETSTARTLINE | 0x00,
             CHARGEPUMP, chargepump,
             MEMORYMODE, 0x00,
             SEGREMAP | 0x10,
@@ -105,18 +140,26 @@ class SSD1306(object):
             DISPLAYALLON_RESUME,
             NORMALDISPLAY,
             DISPLAYON]
-    for item in data:                     
+    for item in data:
       self.write_command(item)
     self.clear()
     self.display()
 
   def poweron(self):
-    self.res.high()
-    pyb.delay(1)
-    self.res.low()
-    pyb.delay(10)
-    self.res.high()
-    pyb.delay(10)
+    if self.offset == 1:
+      pyb.delay(10)
+    else:
+      self.res.high()
+      pyb.delay(1)
+      self.res.low()
+      pyb.delay(10)
+      self.res.high()
+      pyb.delay(10)
 
   def poweroff(self):
-    self.write_command(0xae)  # Set display off
+    self.write_command(DISPLAYOFF)
+
+  def contrast(self, contrast):
+    self.write_command(SETCONTRAST)
+    self.write_command(contrast)
+
