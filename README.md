@@ -11,6 +11,7 @@ Current drivers
   * Contributors:
     * Kenneth Henderick @khenderick
     * @nealcrook
+    * Mike Mabey @mmabey
 
 Micropython board
 -----------------

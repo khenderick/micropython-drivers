@@ -185,3 +185,26 @@ class SSD1306(object):
     self.write_command(SETCONTRAST)
     self.write_command(contrast)
 
+  def set_start_end_cols(self, start_col=0, end_col=None):
+    if end_col is None:
+      end_col = self.columns - 1
+    if start_col < 0 or start_col > self.columns - 1:
+      raise ValueError('Start column must be between 0 and %d.' % (self.columns - 1,))
+    if end_col < 0 or end_col > self.columns -1:
+      raise ValueError('End column must be between 0 and %d.' % (self.columns - 1,))
+
+    self.write_command(COLUMNADDR)
+    self.write_command(start_col)  # Start column
+    self.write_command(end_col)  # End column
+
+  def set_start_end_pages(self, start_page=0, end_page=None):
+    if end_page is None:
+      end_page = self.pages - 1
+    if start_page < 0 or start_page > self.pages - 1:
+      raise ValueError('Start page must be between 0 and %d.' % (self.pages - 1,))
+    if end_page < 0 or end_page > self.pages - 1:
+      raise ValueError('End page must be between 0 and %d.' % (self.pages - 1,))
+
+    self.write_command(PAGEADDR)
+    self.write_command(start_page)  # Page start address. (0 = reset)
+    self.write_command(end_page)  # Page end address.
